@@ -62,8 +62,8 @@ All code was written for ```python 3.11.5```.
 The complete SimBank simulator can be found in the ```SimBank/``` folder. The file SimBank_Generator_Guide.ipynb contains a full walkthrough on how to use SimBank to create offline datasets and allow online training for each intervention, to vary the confounding level, and to evaluate method policies.
 
 ## Experiments of the paper
-Download the data for the experiments from [OneDrive](https://kuleuven-my.sharepoint.com/:f:/g/personal/jakob_demoor_kuleuven_be/EuhF_qPmUGNKkR30eWVxENgBnflVca5sWTIdhrLa46d4Fw?e=ZassYK). 
+Download the data for the experiments from [Google Drive](https://drive.google.com/drive/folders/1h-U79mBA7D-iWIlxGYo0XJ45Cpw_snPF?usp=sharing). 
 
 Put the data in the ```data/``` folder. Now, the results from the paper can be reproduced by setting the ```path``` variable in the config/config.py file to your directory and running the appropriate script.
 
-Download the results of the experiments from [OneDrive](https://kuleuven-my.sharepoint.com/:f:/g/personal/jakob_demoor_kuleuven_be/EtNIWiT10nhOiTXUucO3EgAByvsXhLGFXZGTM5jF0GI14g?e=CZeFfa). 
+Download the results of the experiments from [Google Drive](https://drive.google.com/drive/folders/1gx3aofKYhbKT-KOOlQxflRlOmR2Ku4y5?usp=sharing). 
