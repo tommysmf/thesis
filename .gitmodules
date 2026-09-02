@@ -1,0 +1,7 @@
+[submodule "simbank"]
+	path = simbank
+	url = https://github.com/JakobDeMoorKULstudent/SimBank.git
+	branch = main
+[submodule "robot_data"]
+	path = robot_data
+	url = https://github.com/ics-unisg/edge-robots.git
