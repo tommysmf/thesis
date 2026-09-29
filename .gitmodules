@@ -8,3 +8,6 @@
 [submodule "realcause"]
 	path = realcause
 	url = https://github.com/bradyneal/realcause
+[submodule "ProCause"]
+	path = ProCause
+	url = https://github.com/cedriclepage-4/ProCause
