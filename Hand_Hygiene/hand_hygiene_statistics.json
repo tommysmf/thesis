@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "total_records": 155,
+    "date_range": {
+      "start": "2024-09-11T15:56:26.929568+00:00",
+      "end": "2024-09-13T11:42:46.117803+00:00"
+    },
+    "log_types": [
+      "basic",
+      "disturbance",
+      "two_patients"
+    ],
+    "unique_cases": 32,
+    "generated_timestamp": "2025-07-18T12:22:55.213138"
+  },
+  "case_statistics": {
+    "description": "Statistics for ml_used summed per case (filename_base)",
+    "data": {
+      "basic": {
+        "count": 18,
+        "mean": 3.7777777777777777,
+        "median": 3.0,
+        "q1": -0.75,
+        "q3": 7.75,
+        "min": -6.0,
+        "max": 15.0,
+        "std": 5.968021778664793
+      },
+      "disturbance": {
+        "count": 10,
+        "mean": 5.7,
+        "median": 6.5,
+        "q1": 3.5,
+        "q3": 10.0,
+        "min": -9.0,
+        "max": 13.0,
+        "std": 6.0174745533321525
+      },
+      "two_patients": {
+        "count": 4,
+        "mean": 10.75,
+        "median": 10.0,
+        "q1": 1.25,
+        "q3": 19.5,
+        "min": -1.0,
+        "max": 24.0,
+        "std": 10.520812706250407
+      },
+      "overall": {
+        "count": 32,
+        "mean": 5.25,
+        "median": 5.0,
+        "q1": 0.0,
+        "q3": 10.25,
+        "min": -9.0,
+        "max": 24.0,
+        "std": 7.088723439378913
+      }
+    }
+  },
+  "activity_statistics": {
+    "description": "Statistics for ml_used per individual activity instance",
+    "data": {
+      "basic": {
+        "count": 72,
+        "mean": 0.9444444444444444,
+        "median": 1.0,
+        "q1": -1.0,
+        "q3": 3.25,
+        "min": -14.0,
+        "max": 18.0,
+        "std": 4.284626552146409
+      },
+      "disturbance": {
+        "count": 51,
+        "mean": 1.1176470588235294,
+        "median": 1.0,
+        "q1": -1.0,
+        "q3": 3.0,
+        "min": -12.0,
+        "max": 18.0,
+        "std": 4.470588235294118
+      },
+      "two_patients": {
+        "count": 32,
+        "mean": 1.34375,
+        "median": 1.0,
+        "q1": -1.0,
+        "q3": 3.0,
+        "min": -11.0,
+        "max": 18.0,
+        "std": 5.145443220705093
+      },
+      "overall": {
+        "count": 155,
+        "mean": 1.0838709677419356,
+        "median": 1.0,
+        "q1": -1.0,
+        "q3": 3.0,
+        "min": -14.0,
+        "max": 18.0,
+        "std": 4.5379472959445035
+      }
+    }
+  }
+}
