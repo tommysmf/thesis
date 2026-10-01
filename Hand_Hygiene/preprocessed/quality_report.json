@@ -1,0 +1,33 @@
+{
+  "source": "observed_only",
+  "counterfactuals_generated": false,
+  "case_count": 32,
+  "event_count": 1326,
+  "completed_hand_hygiene_actions": 155,
+  "iot_reading_count": 50317,
+  "trace_types": {
+    "basic": 922,
+    "disturbance": 404
+  },
+  "iot_records_by_station": {
+    "LEFT_DONATION": 16773,
+    "RIGHT_DONATION": 16772,
+    "HYGIENE_STATION": 16772
+  },
+  "iot_parse_errors": {},
+  "missing_load_cell_values": 0,
+  "action_columns": [
+    "case_id",
+    "trace_type",
+    "instance_id",
+    "start_time",
+    "end_time",
+    "duration_seconds",
+    "action_observed"
+  ],
+  "notes": [
+    "No ml_used column is produced.",
+    "No-action opportunities are not inferred yet.",
+    "Potential outcomes must be generated in a separate semi-synthetic step."
+  ]
+}
