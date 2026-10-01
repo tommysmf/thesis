@@ -1,0 +1,13 @@
+# Python environments and caches
+venv/
+.venv/
+**/venv/
+__pycache__/
+*.pyc
+
+# Generated benchmark data: rebuild with  python cc_generator/generate.py ...
+cc_generator/output/
+
+# Raw cotton candy data (356 MB): download from Zenodo, see cc_generator/README.md
+datasets/cotton-candy/batch-*/
+datasets/cotton-candy/*.zip
