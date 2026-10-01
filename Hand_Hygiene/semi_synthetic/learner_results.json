@@ -1,0 +1,73 @@
+{
+  "base_model": "sklearn.linear_model.Ridge(alpha=1.0)",
+  "split": "case-level; lexicographically last 25% of cases held out",
+  "train_cases": [
+    "s1s1",
+    "s1s2",
+    "s1s3",
+    "s1s4",
+    "s1s5",
+    "s1s6",
+    "s1s7",
+    "s1s8",
+    "s2s1",
+    "s2s2",
+    "s2s3",
+    "s2s4",
+    "s2s5",
+    "s2s6",
+    "s2s7",
+    "s2s8",
+    "s3s1",
+    "s3s2",
+    "s3s3",
+    "s3s4",
+    "s3s5",
+    "s3s6",
+    "s3s7",
+    "s3s8"
+  ],
+  "test_cases": [
+    "s4s1",
+    "s4s2",
+    "s4s3",
+    "s4s4",
+    "s4s5",
+    "s4s6",
+    "s4s7",
+    "s4s8"
+  ],
+  "train_rows": 109,
+  "test_rows": 46,
+  "results": [
+    {
+      "learner": "S-learner Ridge",
+      "test_rows": 46.0,
+      "y0_rmse": 0.22244028325255696,
+      "y1_rmse": 0.051964536095060326,
+      "factual_rmse": 0.10039387682790203,
+      "ite_mae": 0.2198920550399891,
+      "policy_value": -1.5328974347826088,
+      "oracle_policy_value": -1.5279843913043478,
+      "policy_regret": 0.0049130434782608595,
+      "oracle_action_accuracy": 0.782608695652174,
+      "estimated_ate": 0.11217207340802521,
+      "true_ate": 0.2691482173913043
+    },
+    {
+      "learner": "T-learner Ridge",
+      "test_rows": 46.0,
+      "y0_rmse": 0.10825436138631721,
+      "y1_rmse": 0.028596583746931428,
+      "factual_rmse": 0.05851072478057077,
+      "ite_mae": 0.07093689699342018,
+      "policy_value": -1.5302813695652178,
+      "oracle_policy_value": -1.5279843913043478,
+      "policy_regret": 0.0022969782608695606,
+      "oracle_action_accuracy": 0.8478260869565217,
+      "estimated_ate": 0.2414143715337978,
+      "true_ate": 0.2691482173913043
+    }
+  ],
+  "interpretation": "Metrics use generated potential outcomes and are benchmark metrics, not observational estimates."
+}
