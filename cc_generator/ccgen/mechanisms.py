@@ -1,56 +1,58 @@
-"""The two specified mechanisms: the historical policy and the outcome.
+"""The specified mechanisms: the historical policy and the outcome.
 
-Both are plain functions of the case state, so methods, baselines and the online mode all use
-exactly the same definitions as the generator.
+Plain functions of the case state, so methods, baselines and the online mode use exactly the same
+definitions as the generator. The state at decision point k is the real head reading at its real,
+irregular time t_k; the policy and the outcome both use that reading.
 """
+from math import erf, sqrt
 import numpy as np
 
 
-def sigmoid(z):
-    return 1.0 / (1.0 + np.exp(-z))
-
-
 # ---- historical policy ------------------------------------------------------------------------
-def start_probability(head, t, cfg):
-    """Chance that the historical operator starts spinning at this decision point (if not yet started).
-
-    p = sigmoid(beta*(head - h_star) + gamma*(t - t_star)), clipped to [eps, 1 - eps].
-    """
-    p = sigmoid(cfg.beta * (np.asarray(head) - cfg.h_star) + cfg.gamma * (np.asarray(t) - cfg.t_star))
-    return np.clip(p, cfg.eps, 1 - cfg.eps)
+def last_point(t_rel):
+    return len(t_rel) - 1
 
 
-def sample_start(p, rng):
-    """Walk through the decision points; the first coin flip that says 'start' wins.
-    The last point always starts (forced). Returns the index of the start point."""
-    hits = rng.random(len(p)) < p
-    return int(np.argmax(hits)) if hits.any() else len(p) - 1
+def controller_point(head_obs, threshold):
+    """Temperature controller: start at the first reading at or above the threshold (else the last point)."""
+    hit = np.nonzero(np.asarray(head_obs) >= threshold)[0]
+    return int(hit[0]) if len(hit) else len(head_obs) - 1
 
 
-def historical_start(p, cfg, rng):
-    """Start index under the historical policy: with probability delta the rule (hazard p),
-    otherwise a uniformly random decision point (randomized, unconfounded)."""
-    if rng.random() < cfg.delta:
-        return sample_start(p, rng), True
-    return int(rng.integers(len(p))), False
+def fixed_wait_point(t_rel, wait):
+    """Fixed waiting time: start at the first reading at least `wait` s after "stick placed" (else the last)."""
+    return int(min(np.searchsorted(t_rel, wait, side="left"), len(t_rel) - 1))
 
 
-def start_distribution(p, delta=1.0):
-    """Exact probability of starting at each point under the historical policy:
-    delta * p_k * prod_{j<k}(1 - p_j)  (the last point takes the rest)  +  (1 - delta) / K."""
-    p = np.asarray(p, dtype=float).copy()
-    p[-1] = 1.0
-    survive = np.concatenate([[1.0], np.cumprod(1 - p[:-1])])
-    return delta * p * survive + (1 - delta) / len(p)
+def point_distribution(points, n):
+    """Share of `points` (start indices) landing on each of n decision points."""
+    return np.bincount(np.asarray(points, dtype=int), minlength=n)[:n] / len(points)
+
+
+def controller_distribution_hidden(head, threshold, sd):
+    """Exact chance of each start point for a controller whose threshold is threshold + sd*u, u ~ N(0, 1)
+    unobserved: it starts at the first k where the running maximum of the readings reaches the threshold."""
+    run_max = np.maximum.accumulate(np.asarray(head, dtype=float))
+    cdf = np.array([0.5 * (1 + erf((m - threshold) / (sd * sqrt(2)))) for m in run_max])
+    p = np.diff(np.concatenate([[0.0], cdf]))
+    p[-1] += 1.0 - cdf[-1]                 # never reached: forced start at the last point
+    return p
 
 
 # ---- outcome ----------------------------------------------------------------------------------
-def optimal_head(wear, hum_z, cfg):
-    """Case-specific optimal head temperature (degC)."""
-    return cfg.h0 + cfg.a_wear * (wear - 30.0) / 30.0 + cfg.b_humidity * hum_z
+def optimal_head(wear, hum_z, cfg, hidden=0.0):
+    """Case-specific optimal head temperature (degC). `hidden` is the unobserved case factor (if switched on)."""
+    return cfg.h0 + cfg.a_wear * (wear - 30.0) / 30.0 + cfg.b_humidity * hum_z + cfg.hidden_effect * hidden
 
 
-def expected_outcome(head, t, h_opt, cfg):
-    """Expected KPI (g) when spinning starts at head temperature `head` at time `t`."""
+def expected_weight(head, h_opt, cfg):
+    """Expected candy weight (g) when spinning starts at head temperature `head`.
+    The window is w wide on both sides, or w_cold below and w_hot above the optimum when those are set."""
     head = np.asarray(head, dtype=float)
-    return cfg.W_max * np.exp(-((head - h_opt) / cfg.w) ** 2) - cfg.lam * np.asarray(t, dtype=float)
+    width = np.where(head < h_opt, cfg.w_cold or cfg.w, cfg.w_hot or cfg.w)
+    return cfg.W_max * np.exp(-((head - h_opt) / width) ** 2)
+
+
+def expected_kpi(head, t_rel, h_opt, cfg):
+    """Expected KPI: weight minus a cost of lam g per second waited after "stick placed"."""
+    return expected_weight(head, h_opt, cfg) - cfg.lam * np.asarray(t_rel, dtype=float)

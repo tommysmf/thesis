@@ -2,8 +2,9 @@
 
     python validate.py --processed <path to cotton-candy/processed>  [--quick]
 
-Prints the checks from the specification and writes validation_report.md next to this script.
-All policy values use the EXPECTED outcome from the answer key (no noise), on the TEST curves.
+Writes validation_report.md (or validation_report_quick.md with --quick) next to this script.
+Policy values use the EXPECTED outcome from the answer key (no noise), on the TEST curves. Numbers that
+depend on random draws are reported as mean +- sd over several seeds.
 """
 import argparse
 import os
@@ -11,25 +12,58 @@ import numpy as np
 import pandas as pd
 
 from ccgen import Config, load_curves, generate
-from ccgen.mechanisms import expected_outcome, optimal_head
-from ccgen.generator import case_states
+from ccgen.config import SCENARIOS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REAL = dict(t_start=(19.0, 22.3, 38.9), head_start=(50.7, 58.1, 70.0), weight=(7.1, 8.6, 9.7))  # p10, median, p90
+REAL_WEIGHT = (7.1, 8.6, 9.7)          # p10, median, p90 of the real measured weights (152 valid runs)
+TEMP_BINS = [0, 55, 60, 65, 70, 75, 80, 95]
 
 
 def pct(s):
     return tuple(float(v) for v in np.percentile(s, [10, 50, 90]).round(1))
 
 
-def realism(tabs):
-    c = tabs["cases"]
-    rows = []
-    for name, col in [("start time (s after machine on)", "t_start"), ("start head temperature (C)", "head_start"),
-                      ("observed outcome (g)", "y")]:
-        key = {"t_start": "t_start", "head_start": "head_start", "y": "weight"}[col]
-        rows.append((name, pct(c[col]), REAL[key]))
-    return rows
+def ms(values, digits=2):
+    v = np.asarray(values, dtype=float)
+    return f"{v.mean():.{digits}f} +- {v.std():.{digits}f}" if len(v) > 1 else f"{v.mean():.{digits}f}"
+
+
+def cold_start(curves, tabs):
+    """Does the generated operator react to a cold machine like the real one (batches 0-14)?"""
+    c = tabs["cases"].merge(tabs["case_truth"][["case_id", "arm"]], on="case_id").query("arm == 'fixed_wait'")
+    hr = {x.curve_id: x.head_at_ready for x in curves}
+    gen = np.corrcoef(c.curve_id.map(hr), c.t_start - c.t_ready)[0, 1]
+    fr = [x for x in curves if not x.real_controller]
+    real = np.corrcoef([x.head_at_ready for x in fr], [x.real_wait for x in fr])[0, 1]
+    return gen, real
+
+
+def realism(curves, tabs):
+    c = tabs["cases"].merge(tabs["case_truth"][["case_id", "arm"]], on="case_id")
+    c["wait"] = c.t_start - c.t_ready
+    loop = [x for x in curves if x.real_controller and x.loop_ran]
+    fixed = [x for x in curves if not x.real_controller]
+    return [
+        ("controller arm: head reading at start (C)", pct(c[c.arm == "controller"].head_start),
+         pct([np.interp(x.t_real_start, x.x, x.head) for x in loop])),
+        ("controller arm: wait after stick placed (s)", pct(c[c.arm == "controller"].wait),
+         pct([x.real_wait for x in curves if x.real_controller])),
+        ("fixed-wait arm: wait after stick placed (s)", pct(c[c.arm == "fixed_wait"].wait),
+         pct([x.real_wait for x in fixed])),
+        ("observed weight (g)", pct(c.weight), REAL_WEIGHT),
+    ]
+
+
+def weight_by_temperature(curves, tabs, processed):
+    """Mean weight by head reading at the start: real runs vs generated cases (historical arms only)."""
+    runs = pd.read_csv(os.path.join(processed, "runs.csv"))
+    real = pd.DataFrame([(x.curve_id, np.interp(x.t_real_start, x.x, x.head)) for x in curves],
+                        columns=["instance", "h"]).merge(runs[["instance", "weight"]], on="instance")
+    real = real[(real.weight > 3) & (real.weight < 15)]     # 17.4 g (run 64570) is an outlier
+    g = tabs["cases"].merge(tabs["case_truth"][["case_id", "arm"]], on="case_id").query("arm != 'random'")
+    rb = real.groupby(pd.cut(real.h, TEMP_BINS), observed=False).weight.agg(["mean", "size"])
+    gb = g.groupby(pd.cut(g.head_start, TEMP_BINS), observed=False).weight.mean()
+    return rb, gb
 
 
 def naive_vs_truth(tabs, early=(0, 4), late=(10, 40)):
@@ -43,98 +77,131 @@ def naive_vs_truth(tabs, early=(0, 4), late=(10, 40)):
     cases = cases.assign(delay=cases.t_start - cases.t_ready)
     e = cases[(cases.delay >= early[0]) & (cases.delay <= early[1])].y
     l = cases[(cases.delay >= late[0]) & (cases.delay <= late[1])].y
-    return truth, l.mean() - e.mean(), len(e), len(l)
+    return truth, l.mean() - e.mean()
 
 
-def baselines(curves, tabs, cfg):
-    """Policy values on the test curves (expected outcome, averaged over cases)."""
-    test_ids = set(tabs["cases"].query("split == 'test'").curve_id)
-    res = {}
+def trailing_mean(x, v, width=10.0):
+    """Mean of the readings in the last `width` seconds (a method may compute this online)."""
+    lo = np.searchsorted(x, x - width)
+    c = np.concatenate([[0.0], np.cumsum(v)])
+    idx = np.arange(len(v)) + 1
+    return (c[idx] - c[lo]) / (idx - lo)
+
+
+def first_at_least(values, threshold):
+    hit = np.nonzero(values >= threshold)[0]
+    return hit[0] if len(hit) else len(values) - 1
+
+
+def baselines(cases):
+    """Policy values on the test cases (expected KPI, averaged over cases). Thresholds act on what a method
+    can see: the current reading, or the mean of the readings in the last 10 s."""
+    test = [cs for cs in cases if cs["split"] == "test"]
     delays = np.arange(0, 121, 10)
-    thresholds = np.arange(50, 81, 2)
-    per = {"start at ready": [], "oracle (best moment per case)": []}
-    per_delay = {d: [] for d in delays}
-    per_thr = {T: [] for T in thresholds}
-    for c in curves:
-        if c.curve_id not in test_ids:
-            continue
-        t, head, _ = case_states(c, cfg)
-        ey = expected_outcome(head, t, optimal_head(c.wear, c.hum_z, cfg), cfg)
-        per["start at ready"].append(ey[0])
-        per["oracle (best moment per case)"].append(ey.max())
+    thresholds = np.arange(46, 90, 1)
+    v = {"historical policy": [], "oracle": [], "observable oracle": []}
+    by_delay = {d: [] for d in delays}
+    by_raw = {T: [] for T in thresholds}
+    by_avg = {T: [] for T in thresholds}
+    for cs in test:
+        st, ey = cs["st"], cs["ey"]
+        avg = trailing_mean(cs["curve"].x, cs["curve"].head)[st["idx"]]
+        v["historical policy"].append(ey[cs["k_start"]])
+        v["oracle"].append(ey.max())
+        v["observable oracle"].append(ey[int(np.argmax(cs["ey_obs"]))])
         for d in delays:
-            per_delay[d].append(ey[min(np.searchsorted(t, t[0] + d), len(t) - 1)])
+            by_delay[d].append(ey[first_at_least(st["t_rel"], d)])
         for T in thresholds:
-            hit = np.nonzero(head >= T)[0]
-            per_thr[T].append(ey[hit[0]] if len(hit) else ey[-1])
-    truth = tabs["case_truth"].merge(tabs["cases"][["case_id", "split"]], on="case_id").query("split == 'test'")
-    res["start at ready"] = np.mean(per["start at ready"])
-    res["historical policy"] = truth.expected_y_historical.mean()
-    best_d = max(delays, key=lambda d: np.mean(per_delay[d]))
-    res[f"best fixed delay ({best_d} s after ready)"] = np.mean(per_delay[best_d])
-    best_T = max(thresholds, key=lambda T: np.mean(per_thr[T]))
-    res[f"best fixed threshold (start at {best_T} C)"] = np.mean(per_thr[best_T])
-    res["oracle (best moment per case)"] = np.mean(per["oracle (best moment per case)"])
+            by_raw[T].append(ey[first_at_least(st["head"], T)])
+            by_avg[T].append(ey[first_at_least(avg, T)])
+    res = {k: float(np.mean(x)) for k, x in v.items()}
+    res["best fixed delay"] = max(np.mean(x) for x in by_delay.values())
+    res["best threshold, current reading"] = max(np.mean(x) for x in by_raw.values())
+    res["best threshold, 10 s mean"] = max(np.mean(x) for x in by_avg.values())
+    res["best is the first moment (share)"] = float(np.mean([np.argmax(cs["ey"]) == 0 for cs in test]))
     return res
+
+
+def run(curves, seeds, resamples, **kw):
+    """Baselines and naive error for one configuration, over several seeds."""
+    out = []
+    for s in seeds:
+        cfg = Config(**kw, seed=s, resamples_per_curve=resamples)
+        cases, tabs = generate(curves, cfg)
+        b = baselines(cases)
+        tr, nv = naive_vs_truth(tabs)
+        b["naive error"] = nv - tr
+        out.append(b)
+    return {k: [o[k] for o in out] for k in out[0]}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--processed", required=True)
-    ap.add_argument("--quick", action="store_true", help="fewer resamples and no knob sweeps")
+    ap.add_argument("--quick", action="store_true", help="one seed, fewer resamples, no sweeps")
     args = ap.parse_args()
     curves = load_curves(args.processed)
+    seeds = [0] if args.quick else [0, 1, 2]
+    res = 5 if args.quick else 10
     cfg = Config(resamples_per_curve=5 if args.quick else 20)
-    _, tabs = generate(curves, cfg)
-    out = ["# Validation report", "", f"Config: `{cfg.to_dict()}`", ""]
+    cases, tabs = generate(curves, cfg)
+    out = ["# Validation report", "", f"Config: `{cfg.to_dict()}`", "",
+           f"{len(tabs['cases'])} cases from {len(curves)} real curves "
+           f"({sum(c.real_controller for c in curves)} from controller batches); decision points per case "
+           f"{pct(tabs['answer_key'].groupby('case_id').size())} (p10 / median / p90).", ""]
 
     out += ["## 1. Realism (generated vs real, p10 / median / p90)", "", "| Quantity | Generated | Real |", "|---|---|---|"]
-    for name, g, r in realism(tabs):
+    for name, g, r in realism(curves, tabs):
         out.append(f"| {name} | {g} | {r} |")
+    gen_r, real_r = cold_start(curves, tabs)
+    out += ["", f"Fixed-wait arm, correlation between head temperature at \"stick placed\" and waiting time: "
+            f"generated {gen_r:+.2f}, real {real_r:+.2f} (cold machines wait longer)."]
+    rb, gb = weight_by_temperature(curves, tabs, args.processed)
+    out += ["", "Mean weight by head reading at the start (real runs vs generated historical cases). The outcome is",
+            "specified, not fitted; the real comparison is small, confounded and almost flat (one 17.4 g outlier",
+            "excluded), so it is a sanity check only.", "",
+            "| Head at start | " + " | ".join(str(i) for i in rb.index) + " |", "|---" * (len(rb) + 1) + "|",
+            "| Real (g) | " + " | ".join(f"{m:.2f} (n={n})" for m, n in zip(rb["mean"], rb["size"])) + " |",
+            "| Generated (g) | " + " | ".join(f"{v:.2f}" for v in gb) + " |"]
 
-    truth, naive, ne, nl = naive_vs_truth(tabs)
-    out += ["", "## 2. Confounding: waiting 10-40 s vs starting right away", "",
-            f"True effect {truth:+.2f} g; naive comparison of observed cases {naive:+.2f} g "
-            f"({ne} early starters vs {nl} late starters)."]
-
-    out += ["", "## 3. Baseline policies (test curves, expected outcome in g)", "", "| Policy | Value |", "|---|---|"]
-    for k, v in baselines(curves, tabs, cfg).items():
-        out.append(f"| {k} | {v:.2f} |")
+    main_runs = run(curves, seeds, res)
+    out += ["", f"## 2. Baselines and confounding (realistic defaults; mean +- sd over seeds {seeds})", "",
+            "| Quantity | Value |", "|---|---|"]
+    for k in ["historical policy", "best fixed delay", "best threshold, current reading", "best threshold, 10 s mean",
+              "oracle", "best is the first moment (share)", "naive error"]:
+        out.append(f"| {k} | {ms(main_runs[k])} |")
+    out += ["", "Naive error = (naive estimate - truth) of the effect of waiting 10-40 s instead of 0-4 s."]
 
     if not args.quick:
-        out += ["", "## 4. Knobs", "", "Confounding share delta (SimBank-style; true vs naive effect of waiting 10-40 s):", "",
-                "| delta | true | naive | naive error | late starters |", "|---|---|---|---|---|"]
-        for d in [0.0, 0.5, 0.75, 0.95, 1.0]:
-            _, td = generate(curves, Config(delta=d, resamples_per_curve=40))
-            tr, nv, _, nl = naive_vs_truth(td)
-            out.append(f"| {d} | {tr:+.2f} | {nv:+.2f} | {nv - tr:+.2f} | {nl} |")
-        out += ["", "Temperature dependence beta of the rule (not monotone in the naive error; see README):", "",
-                "| beta | true | naive | naive error | late starters |", "|---|---|---|---|---|"]
-        for b in [0.0, 0.15, 0.3, 0.6]:
-            _, tb = generate(curves, Config(beta=b, resamples_per_curve=40))
-            tr, nv, _, nl = naive_vs_truth(tb)
-            out.append(f"| {b} | {tr:+.2f} | {nv:+.2f} | {nv - tr:+.2f} | {nl} |")
-        out += ["", "Heterogeneity of the optimal temperature (a_wear, b_humidity scaled together):", "",
-                "| scale | historical | best fixed threshold | oracle | oracle - threshold |", "|---|---|---|---|---|"]
-        for f in [0.0, 0.5, 1.0, 1.5]:
-            c3 = Config(a_wear=8.0 * f, b_humidity=-4.0 * f, resamples_per_curve=5)
-            _, t3 = generate(curves, c3)
-            b3 = baselines(curves, t3, c3)
-            thr = [v for k, v in b3.items() if k.startswith("best fixed threshold")][0]
-            orc = b3["oracle (best moment per case)"]
-            out.append(f"| {f} | {b3['historical policy']:.2f} | {thr:.2f} | {orc:.2f} | {orc - thr:.2f} |")
-        out += ["", "Heating correction after the real start (sensitivity of the conclusions):", "",
-                "| slowdown | historical | oracle | gap |", "|---|---|---|---|"]
-        for s in [0.7, 0.8, 0.9, 1.0]:
-            c2 = Config(after_start_slowdown=s, resamples_per_curve=5)
-            _, t2 = generate(curves, c2)
-            b2 = baselines(curves, t2, c2)
-            out.append(f"| {s} | {b2['historical policy']:.2f} | {b2['oracle (best moment per case)']:.2f} | "
-                       f"{b2['oracle (best moment per case)'] - b2['historical policy']:.2f} |")
+        def table(title, key, values, extra=None):
+            rows = ["", title, "", f"| {key} | historical | best threshold, current reading | best threshold, 10 s mean | "
+                    "oracle | naive error |", "|---|---|---|---|---|---|"]
+            for val in values:
+                r = run(curves, seeds, res, **{key: val}, **(extra or {}))
+                rows.append(f"| {val} | {ms(r['historical policy'])} | {ms(r['best threshold, current reading'])} | "
+                            f"{ms(r['best threshold, 10 s mean'])} | {ms(r['oracle'])} | {ms(r['naive error'])} |")
+            return rows
+
+        out += ["", "## 3. Knobs"]
+        out += table("Share following the real batch policy, delta (the rest starts at a random moment):", "delta",
+                     [0.0, 0.5, 0.95, 1.0])
+        out += table("Width of the outcome window w (C); W_max fixed:", "w", [20.0, 30.0, 40.0, 60.0])
+        out += table("Optimal head temperature h0 (C):", "h0", [60.0, 65.0, 70.0])
+        out += table("Wear effect on the optimum a_wear (C per 30 candies):", "a_wear", [0.0, 8.0, 16.0])
+
+        out += ["", "## 4. Scenarios (generate.py --scenario NAME)", "",
+                "| scenario | historical | best threshold, current reading | best threshold, 10 s mean | "
+                "observable oracle | oracle | naive error |", "|---|---|---|---|---|---|---|"]
+        for name, kw in SCENARIOS.items():
+            r = run(curves, seeds, res, **kw)
+            out.append(f"| {name} | {ms(r['historical policy'])} | {ms(r['best threshold, current reading'])} | "
+                       f"{ms(r['best threshold, 10 s mean'])} | {ms(r['observable oracle'])} | {ms(r['oracle'])} | "
+                       f"{ms(r['naive error'])} |")
 
     report = "\n".join(out)
     print(report)
-    with open(os.path.join(HERE, "validation_report.md"), "w") as f:
+    name = "validation_report_quick.md" if args.quick else "validation_report.md"
+    with open(os.path.join(HERE, name), "w") as f:
         f.write(report + "\n")
 
 
