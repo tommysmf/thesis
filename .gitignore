@@ -11,3 +11,17 @@ cc_generator/output/
 # Raw cotton candy data (356 MB): download from Zenodo, see cc_generator/README.md
 datasets/cotton-candy/batch-*/
 datasets/cotton-candy/*.zip
+
+# presbench: generated data and quick reports
+presbench/output/
+presbench/validation_report_*_quick.md
+
+# other information
+thesis_info.txt
+# Raw Vienna tram data (631 MB): Zenodo record 7411234
+datasets/vienna-tram/raw/
+# Raw smart factory data (1.1 GB): figshare 20130794
+datasets/smart-factory/raw/
+# Screened and rejected datasets (raw downloads)
+datasets/digital-twin/raw/
+datasets/pcr-lab/raw/
